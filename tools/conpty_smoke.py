@@ -94,6 +94,7 @@ class Screen:
         with self.lock:
             self.width, self.height = width, height
             self.rows.clear()
+            self.x = self.y = 0
 
     def feed(self, data):
         with self.lock:
@@ -163,6 +164,11 @@ class Screen:
 
     def status(self):
         with self.lock:
+            visible_footer = range(max(0, self.height - 8), self.height)
+            for row_index in visible_footer:
+                row = "".join(self.rows.get(row_index, [])).lstrip()
+                if row.startswith(("加载", "播放", "暂停", "缓冲", "结束", "播放失败")):
+                    return row
             return "".join(self.rows.get(self.height - 3, []))
 
     def header(self):
