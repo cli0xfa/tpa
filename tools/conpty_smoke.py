@@ -225,8 +225,8 @@ def main():
     reader = threading.Thread(target=drain, daemon=True)
     reader.start()
 
-    def expect(word, header=False):
-        deadline = time.monotonic() + 4
+    def expect(word, header=False, timeout=4):
+        deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             if word in (screen.header() if header else screen.status()):
                 return
@@ -249,7 +249,8 @@ def main():
         expect("播放")
         print(json.dumps({"after_modes": screen.status().strip()}, ensure_ascii=False), flush=True)
         send(b"\x1b[D\x1b[C")
-        time.sleep(1)
+        expect("加载中", timeout=5)
+        expect("播放", timeout=20)
         print(json.dumps({"after_seek": screen.status().strip()}, ensure_ascii=False), flush=True)
         assert resize_console(console, Coord(20, 8)) == 0
         screen.resize(20, 8)

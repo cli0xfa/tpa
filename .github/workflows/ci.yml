@@ -40,7 +40,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Path target/verification -Force | Out-Null
-          ffmpeg -hide_banner -loglevel error -y -f lavfi -i testsrc2=size=320x180:rate=30:duration=30 -c:v mpeg4 -q:v 8 target/verification/terminal.mp4
+          ffmpeg -hide_banner -loglevel error -y -f lavfi -i testsrc2=size=320x180:rate=30:duration=60 -c:v mpeg4 -q:v 8 target/verification/terminal.mp4
           if ($LASTEXITCODE -ne 0) { throw 'Could not generate terminal fixture' }
           python -X utf8 tools/conpty_smoke.py target/release/tpa.exe target/verification/terminal.mp4 --no-audio
           if ($LASTEXITCODE -ne 0) { throw 'ConPTY verification failed' }
