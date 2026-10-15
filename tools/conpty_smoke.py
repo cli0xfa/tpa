@@ -144,7 +144,7 @@ class Screen:
                 if end < 0:
                     end = len(text)
                 segment = text[i:end]
-                if self.y == 0 or self.y >= self.height - 8:
+                if 0 <= self.y < max(self.height, 256):
                     row = self.rows.setdefault(self.y, [" "] * self.width)
                     for char in segment:
                         if char == "\r":
@@ -164,12 +164,15 @@ class Screen:
 
     def status(self):
         with self.lock:
-            visible_footer = range(max(0, self.height - 8), self.height)
-            for row_index in visible_footer:
-                row = "".join(self.rows.get(row_index, [])).lstrip()
-                if row.startswith(("加载", "播放", "暂停", "缓冲", "结束", "播放失败")):
+            status_labels = ("加载", "播放", "暂停", "缓冲", "结束", "播放失败")
+            for row_index in sorted(self.rows):
+                row = "".join(self.rows[row_index]).strip()
+                if any(label in row for label in status_labels):
                     return row
-            return "".join(self.rows.get(self.height - 3, []))
+            return "\n".join(
+                "".join(self.rows.get(row_index, [])).rstrip()
+                for row_index in range(max(0, self.height - 8), self.height)
+            )
 
     def header(self):
         with self.lock:
