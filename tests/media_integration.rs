@@ -71,7 +71,9 @@ fn audio_onset(tools: &Tools, info: &tpa::media::MediaInfo, offset: f64) -> f64 
     reader.read_to_end(&mut bytes).unwrap();
     process.exit_checker()().unwrap();
     let first = bytes
-        .chunks_exact(8)
+        .as_chunks::<8>()
+        .0
+        .iter()
         .position(|frame| f32::from_le_bytes(frame[..4].try_into().unwrap()).abs() > 0.1)
         .unwrap();
     offset + first as f64 / 48000.0
