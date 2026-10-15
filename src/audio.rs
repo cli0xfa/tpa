@@ -161,8 +161,8 @@ impl AudioOutput {
                         if cancelled.load(Ordering::Acquire) {
                             return Ok(());
                         }
-                        for sample in frame.chunks_exact(4) {
-                            let value = f32::from_le_bytes(sample.try_into().unwrap());
+                        for sample in frame.as_chunks::<4>().0 {
+                            let value = f32::from_le_bytes(*sample);
                             // Callback cannot consume an incomplete channel frame.
                             producer
                                 .push(if value.is_finite() {
