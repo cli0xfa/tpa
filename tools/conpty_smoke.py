@@ -144,7 +144,7 @@ class Screen:
                 if end < 0:
                     end = len(text)
                 segment = text[i:end]
-                if self.y == 0 or self.y >= self.height - 3:
+                if self.y == 0 or self.y >= self.height - 8:
                     row = self.rows.setdefault(self.y, [" "] * self.width)
                     for char in segment:
                         if char == "\r":
