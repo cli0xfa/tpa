@@ -165,9 +165,9 @@ class Screen:
     def status(self):
         with self.lock:
             status_labels = ("加载", "播放", "暂停", "缓冲", "结束", "播放失败")
-            for row_index in sorted(self.rows):
-                row = "".join(self.rows[row_index]).strip()
-                if any(label in row for label in status_labels):
+            for row_index in sorted(self.rows, reverse=True):
+                row = "".join(self.rows[row_index]).lstrip()
+                if row.startswith(status_labels):
                     return row
             return "\n".join(
                 "".join(self.rows.get(row_index, [])).rstrip()
