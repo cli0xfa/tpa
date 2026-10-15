@@ -1,0 +1,60 @@
+name: CI
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      TPA_REQUIRE_FFMPEG: '1'
+      MACOSX_DEPLOYMENT_TARGET: '14.2'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Linux audio development libraries
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - uses: FedericoCarboni/setup-ffmpeg@v3
+        if: runner.os != 'macOS'
+        with:
+          ffmpeg-version: release
+      - name: Native macOS FFmpeg
+        if: runner.os == 'macOS'
+        run: brew install ffmpeg
+      - run: cargo fmt --check
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      - run: cargo test --locked --all-targets
+      - run: cargo build --locked --release
+      - name: Windows terminal black-box verification
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path target/verification -Force | Out-Null
+          ffmpeg -hide_banner -loglevel error -y -f lavfi -i testsrc2=size=320x180:rate=30:duration=30 -c:v mpeg4 -q:v 8 target/verification/terminal.mp4
+          if ($LASTEXITCODE -ne 0) { throw 'Could not generate terminal fixture' }
+          python -X utf8 tools/conpty_smoke.py target/release/tpa.exe target/verification/terminal.mp4 --no-audio
+          if ($LASTEXITCODE -ne 0) { throw 'ConPTY verification failed' }
+      - name: Package player
+        shell: pwsh
+        run: ./tools/package.ps1 -Platform '${{ runner.os }}-${{ runner.arch }}'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tpa-${{ runner.os }}-${{ runner.arch }}
+          path: dist/*.zip
+  msrv:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.88.0
+      - run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - run: cargo check --locked --all-targets
