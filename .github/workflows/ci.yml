@@ -58,3 +58,28 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.88.0
       - run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       - run: cargo check --locked --all-targets
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [test, msrv]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: tpa-*
+          path: dist
+          merge-multiple: true
+      - name: Publish platform packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          assets=(dist/*.zip)
+          if [ "${#assets[@]}" -ne 3 ]; then
+            echo "Expected three platform packages, found ${#assets[@]}" >&2
+            exit 1
+          fi
+          gh release create "$GITHUB_REF_NAME" "${assets[@]}" \
+            --title "TPA $GITHUB_REF_NAME" \
+            --generate-notes
