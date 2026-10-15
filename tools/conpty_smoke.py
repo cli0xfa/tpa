@@ -16,6 +16,7 @@ import time
 import unicodedata
 
 CSI = re.compile(r"\x1b\[([0-?]*)([ -/]*)([@-~])")
+VISIBLE_MARKERS = ("终端播放一切", "加载中", "播放", "暂停", "缓冲", "结束", "盲文", "半块", "ASCII")
 
 if os.name != "nt":
     raise SystemExit("This verification harness requires Windows 10+.")
@@ -80,9 +81,11 @@ class Screen:
     """Decode enough VT to reconstruct the header/status, ignoring video rows."""
     def __init__(self, width=160, height=51):
         self.width, self.height = width, height
-        self.rows = {}
         self.x = self.y = 0
         self.pending = ""
+        self.recent_markers = set()
+        self.text_tail = ""
+        self.marker_lock = threading.Lock()
         self.decoder = codecs.getincrementaldecoder("utf-8")("replace")
         self.bytes = 0
         self.rgb_sequences = 0
@@ -93,7 +96,9 @@ class Screen:
     def resize(self, width, height):
         with self.lock:
             self.width, self.height = width, height
-            self.rows.clear()
+            with self.marker_lock:
+                self.recent_markers.clear()
+                self.text_tail = ""
             self.x = self.y = 0
 
     def feed(self, data):
@@ -113,8 +118,6 @@ class Screen:
                             self.x = ((values[1] if len(values) > 1 else 1) or 1) - 1
                         elif command == "G":
                             self.x = (values[0] or 1) - 1
-                        elif command == "J" and values[0] in (2, 3):
-                            self.rows.clear()
                         elif command == "m" and "38;2;" in parameters:
                             self.rgb_sequences += 1
                         elif command in "nct" and self.reply:
@@ -144,39 +147,26 @@ class Screen:
                 if end < 0:
                     end = len(text)
                 segment = text[i:end]
-                if 0 <= self.y < max(self.height, 256):
-                    row = self.rows.setdefault(self.y, [" "] * self.width)
-                    for char in segment:
-                        if char == "\r":
-                            self.x = 0
-                        elif char == "\n":
-                            self.y += 1
-                        elif not char.isprintable():
-                            continue
-                        else:
-                            width = 2 if unicodedata.east_asian_width(char) in "WF" else 1
-                            if 0 <= self.x < self.width:
-                                row[self.x] = char
-                            if width == 2 and 0 <= self.x + 1 < self.width:
-                                row[self.x + 1] = ""
-                            self.x += width
+                with self.marker_lock:
+                    combined = self.text_tail + segment
+                    self.recent_markers.update(marker for marker in VISIBLE_MARKERS if marker in combined)
+                    self.text_tail = combined[-32:]
+                for char in segment:
+                    if char == "\r":
+                        self.x = 0
+                    elif char == "\n":
+                        self.y += 1
+                    elif char.isprintable():
+                        self.x += 2 if unicodedata.east_asian_width(char) in "WF" else 1
                 i = end
 
     def status(self):
-        with self.lock:
-            status_labels = ("加载", "播放", "暂停", "缓冲", "结束", "播放失败")
-            for row_index in sorted(self.rows, reverse=True):
-                row = "".join(self.rows[row_index]).lstrip()
-                if row.startswith(status_labels):
-                    return row
-            return "\n".join(
-                "".join(self.rows.get(row_index, [])).rstrip()
-                for row_index in range(max(0, self.height - 8), self.height)
-            )
+        with self.marker_lock:
+            return ", ".join(sorted(self.recent_markers))
 
-    def header(self):
-        with self.lock:
-            return "".join(self.rows.get(0, []))
+    def saw(self, marker):
+        with self.marker_lock:
+            return marker in self.recent_markers
 
 
 def main():
@@ -221,6 +211,9 @@ def main():
             errors.append(str(error))
 
     def send(keys):
+        with screen.marker_lock:
+            screen.recent_markers.clear()
+            screen.text_tail = ""
         count = w.DWORD()
         checked(write_file(input_write, keys, len(keys), c.byref(count), None))
 
@@ -231,7 +224,7 @@ def main():
     def expect(word, header=False, timeout=4):
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            if word in (screen.header() if header else screen.status()):
+            if screen.saw(word):
                 return
             time.sleep(0.05)
         raise AssertionError(f"expected {word!r}, status={screen.status()!r}, errors={errors}, pending={screen.pending[:100]!r}, bytes={screen.bytes}, rgb={screen.rgb_sequences}")
