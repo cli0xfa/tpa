@@ -2,6 +2,14 @@
 
 日期：2026-10-15（Asia/Shanghai）。
 
+## v0.2.0 远端持续集成
+
+日期：2026-10-17（Asia/Shanghai）。
+
+- GitHub Actions [CI 运行 39038646087](https://github.com/cli0xfa/tpa/actions/runs/39038646087) 全部通过：Rust 1.88 MSRV 检查，以及 Ubuntu 22.04、macOS、Windows 的格式检查、Clippy、全目标测试、发布构建和打包。
+- Windows ConPTY 检查通过，覆盖 160×51 与 240×73 终端尺寸、60 FPS 参数、尺寸变化和正常退出。
+- 三个平台均成功生成发布包。CI 不测试真实音频设备，也不测量 Windows Terminal 的实际刷新率。
+
 ## 环境
 
 - Windows 11 专业工作站版 Insider Preview，10.0.29683。
@@ -49,5 +57,5 @@
 
 - Linux 原生编译、实际终端与声音验收；本机 Linux 交叉检查因缺少 Linux pkg-config/ALSA sysroot 未能完成。
 - macOS 实际终端、链接产物与声音验收。
-- 本次工作区改动尚未推送，未声称远端 CI 已执行。
+- Windows Terminal 的 160×45@60 FPS 与 240×67@30 FPS 实机刷新率和资源占用验收。
 - 字体外观、复杂真实影片的主观可辨认程度以及拔插音频设备场景，仍需按 TESTING.md 在目标桌面环境中验收。
