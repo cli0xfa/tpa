@@ -42,6 +42,8 @@ pub struct VideoFrame {
     pub width: u32,
     pub height: u32,
     pub rgb: Vec<u8>,
+    /// Time spent waiting for this complete raw frame from the FFmpeg pipe.
+    pub read_elapsed: Duration,
 }
 
 #[derive(Debug)]
@@ -407,7 +409,7 @@ impl VideoDecoder {
         width: u32,
         height: u32,
     ) -> Result<Self> {
-        anyhow::ensure!((1..=60).contains(&fps), "帧率必须在 1 到 60 之间");
+        anyhow::ensure!((1..=120).contains(&fps), "帧率必须在 1 到 120 之间");
         anyhow::ensure!(
             width > 0 && height > 0 && width as u64 * height as u64 <= 16_777_216,
             "终端画面尺寸超出支持范围"
@@ -434,6 +436,7 @@ impl VideoDecoder {
             let mut index = 0u64;
             let outcome: Result<()> = (|| {
                 loop {
+                    let frame_started = Instant::now();
                     let mut rgb = vec![0; size];
                     // read_exact alone cannot distinguish clean EOF from a truncated final frame.
                     let mut filled = 0;
@@ -449,6 +452,7 @@ impl VideoDecoder {
                     if cancelled.load(Ordering::Acquire) {
                         return Ok(());
                     }
+                    let read_elapsed = frame_started.elapsed();
                     // Do not reveal a delayed video stream's first image early.
                     // Read its first real frame before padding, so codec errors
                     // are still reported immediately rather than after the gap.
@@ -459,6 +463,7 @@ impl VideoDecoder {
                             width,
                             height,
                             rgb: vec![0; size],
+                            read_elapsed: Duration::ZERO,
                         };
                         select! {
                             recv(cancel) -> _ => return Ok(()),
@@ -473,6 +478,7 @@ impl VideoDecoder {
                         width,
                         height,
                         rgb,
+                        read_elapsed,
                     };
                     select! {
                         recv(cancel) -> _ => return Ok(()),

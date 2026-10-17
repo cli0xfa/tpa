@@ -176,6 +176,24 @@ fn synchronized_flash_and_beep_have_less_than_one_frame_error() {
 }
 
 #[test]
+fn video_decoder_supports_120_fps_and_emits_uniform_pts() {
+    let Some(tools) = tools() else {
+        return;
+    };
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("high-fps.mkv");
+    generate(&tools, &path, 0.0);
+    let info = tools.probe(&path).unwrap();
+    let decoder = VideoDecoder::start(&tools, &info, 0.0, 9, 120, 16, 12).unwrap();
+    let decoded = frames(&decoder);
+    assert!(decoded.len() >= 235, "decoded {} frames", decoded.len());
+    assert!(decoded.iter().all(|frame| frame.epoch == 9));
+    for pair in decoded.windows(2) {
+        assert!((pair[1].pts - pair[0].pts - 1.0 / 120.0).abs() < 1e-8);
+    }
+}
+
+#[test]
 fn bounded_queue_can_be_cancelled_without_deadlock() {
     let Some(tools) = tools() else {
         return;
@@ -234,6 +252,13 @@ fn player_pause_resize_seek_modes_and_eof() {
         too_small: false,
     });
     assert!(player.epoch > epoch);
+    let resized_epoch = player.epoch;
+    player.command(PlayerCommand::SetPerformance {
+        fps: 60,
+        scale: 0.9,
+    });
+    assert_eq!(player.render_scale, 0.9);
+    assert_eq!(player.epoch, resized_epoch + 1);
     for _ in 0..3 {
         player.command(PlayerCommand::SeekBy(0.5));
     }
@@ -253,6 +278,13 @@ fn player_pause_resize_seek_modes_and_eof() {
     }
     assert!(player.frame.is_some());
     assert_eq!(player.frame.as_ref().unwrap().epoch, player.epoch);
+    assert_eq!(
+        (
+            player.frame.as_ref().unwrap().width,
+            player.frame.as_ref().unwrap().height
+        ),
+        (36, 28)
+    );
     player.command(PlayerCommand::Restart);
     assert!(player.position() < 0.01);
 }

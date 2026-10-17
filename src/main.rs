@@ -76,10 +76,11 @@ fn doctor(tools: &Tools, cli: &Cli) -> Result<()> {
         Err(error) => println!("[缺失] {error:#}"),
     }
     println!(
-        "[终端] 交互式输入={} 输出={}，颜色模式={:?}",
+        "[终端] 交互式输入={} 输出={}，颜色模式={:?}，目标帧率={} FPS",
         io::stdin().is_terminal(),
         io::stdout().is_terminal(),
-        render::resolve_color(cli.color)
+        render::resolve_color(cli.color),
+        cli.target_fps()
     );
     println!("[字体] 需要 UTF-8 等宽字体；请确认 ▀ ⣿ 可正常显示");
     match audio::device_description() {

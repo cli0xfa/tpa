@@ -248,6 +248,14 @@ def main():
         expect("加载中", timeout=5)
         expect("播放", timeout=20)
         print(json.dumps({"after_seek": screen.status().strip()}, ensure_ascii=False), flush=True)
+        assert resize_console(console, Coord(240, 73)) == 0
+        screen.resize(240, 73)
+        time.sleep(2)
+        expect("播放")
+        result["high_resolution_size"] = "240x73 (video 240x67)"
+        assert resize_console(console, Coord(160, 51)) == 0
+        screen.resize(160, 51)
+        expect("播放")
         assert resize_console(console, Coord(20, 8)) == 0
         screen.resize(20, 8)
         time.sleep(2)

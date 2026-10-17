@@ -41,7 +41,8 @@ tpa play <视频路径>         直接播放本地视频
 tpa doctor                  检查工具、终端环境和默认音频设备
 
 --mode half|braille|ascii    默认 half
---fps 1..60                 默认 30，低性能终端可设为 15 或 24
+--fps 1..120                Windows Terminal 默认 60，其他终端默认 30
+--quality auto|fixed        默认 auto；也可固定画质
 --color auto|truecolor|256|mono
 --cell-aspect 0.1..2.0      字符格宽度/高度，默认 0.5
 --no-audio                  使用无声播放
@@ -54,10 +55,13 @@ tpa doctor                  检查工具、终端环境和默认音频设备
 ```sh
 tpa play "movie.mkv" --mode braille --color truecolor
 tpa play "movie.mp4" --fps 24 --no-audio
+tpa play "movie.mp4" --fps 60 --quality fixed
 tpa --ffmpeg "C:/Program Files/ffmpeg/bin/ffmpeg.exe" --ffprobe "C:/Program Files/ffmpeg/bin/ffprobe.exe" doctor
 ```
 
 自动颜色模式识别 `COLORTERM=truecolor/24bit` 和 Windows Terminal 的 `WT_SESSION`，否则使用 256 色；`NO_COLOR` 或 `TERM=dumb` 选择单色。显式 `--color` 优先于自动判断。单色仍使用黑白前景/背景控制序列以保持字符画面可读。
+
+`--quality auto` 会统计字符渲染、终端写入、帧调度和视频管线取帧耗时。连续 3 个一秒窗口中，超过 5% 的帧预算被错过时，先将自动真彩色降到 256 色，再把画面缩小到 90%、80%、75%，随后逐步降低帧率（最低 30 FPS；目标低于 30 时不降低目标）。连续 10 秒没有超时且平均耗时低于帧预算的 70% 后，逐级恢复画质。显式颜色设置不会被自动降色覆盖。`--quality fixed` 不会自动调整画面、颜色或帧率。
 
 终端至少需要 40 列 × 12 行、UTF-8 和能显示 `▀`、`⣿` 的等宽字体。字符格通常宽高比约为 0.5；如果人物显得过胖或过瘦，可调整 `--cell-aspect`。160×45 字符画面是默认性能测试参考尺寸，并非分辨率保证。
 
@@ -74,6 +78,7 @@ tpa --ffmpeg "C:/Program Files/ffmpeg/bin/ffmpeg.exe" --ffprobe "C:/Program File
 | 播放器 | ↑ / ↓ | 音量调整 5% |
 | 播放器 | m | 静音切换 |
 | 播放器 | 1 / 2 / 3 | 半块 / 盲文 / ASCII |
+| 全局 | s | 打开播放设置菜单 |
 | 播放器 | f | 显示 / 隐藏控制栏 |
 | 播放器 | Enter | 播放结束或失败后重播 |
 | 播放器 | Esc | 返回文件浏览器 |
@@ -81,6 +86,8 @@ tpa --ffmpeg "C:/Program Files/ffmpeg/bin/ffmpeg.exe" --ffprobe "C:/Program File
 | 全局 | q / Ctrl+C | 退出 |
 
 筛选输入中，`q` 是普通文本；Enter 完成输入，Esc 退出输入。媒体探测期间可以按 Esc 取消。文件浏览器只列出常见视频扩展名；其他可解码文件使用 `tpa play <路径>` 打开。
+
+在文件浏览器或播放时按 `s` 可打开设置菜单，用方向键选中帧率或画质策略。帧率可在 1–120 FPS 间按 5 FPS 调整（边界值仍可到达）；画质可在自动适配与固定画质间切换。播放中修改会立即应用，自动适配下的实际帧率和画面尺寸会显示在菜单里；这些更改只在当前运行期间生效。
 
 窗口过小时自动暂停；恢复尺寸后继续，用户自己按下的暂停会保留。模式切换复用当前帧；窗口变化防抖 150 ms，只重建视频管线。播放结束保留最后一帧。
 
@@ -126,7 +133,7 @@ cargo run --release --example verify_playback -- video.mp4 60 no-audio
 
 Windows 可在另一个 PowerShell 中运行 `./tools/measure_memory.ps1` 记录播放器及直接子进程内存。桌面终端的人工验收步骤见 [docs/TESTING.md](docs/TESTING.md)。
 
-Windows 还提供只使用 Python 标准库的 ConPTY 黑盒检查，直接操作正式程序的按键和窗口尺寸，并统计真彩色控制序列。它会创建隐藏伪终端，不打开图形窗口：
+Windows 还提供只使用 Python 标准库的 ConPTY 黑盒检查，直接操作正式程序的按键和窗口尺寸，并统计真彩色控制序列。CI 以 60 FPS 运行并检查 160×51 与 240×73 两档窗口。它会创建隐藏伪终端，不打开图形窗口：
 
 ```sh
 python -X utf8 tools/conpty_smoke.py target/release/tpa.exe video.mp4

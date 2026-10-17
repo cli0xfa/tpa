@@ -4,7 +4,7 @@ use crate::{
     media::{DecodeEvent, MediaInfo, Tools, VideoDecoder, VideoFrame},
 };
 use anyhow::Result;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PlayerState {
@@ -37,6 +37,10 @@ pub enum PlayerCommand {
     VolumeBy(i16),
     ToggleMute,
     SetMode(RenderMode),
+    SetPerformance {
+        fps: u32,
+        scale: f64,
+    },
     Resize {
         cols: u16,
         rows: u16,
@@ -117,11 +121,14 @@ pub struct Player {
     pub volume: u8,
     pub muted: bool,
     pub dropped: u64,
+    pub decode_read_ms: f64,
+    pub decoder_starved: bool,
     pub warning: Option<String>,
     pub error: Option<String>,
     pub epoch: u64,
     tools: Tools,
     fps: u32,
+    pub render_scale: f64,
     no_audio: bool,
     audio: Option<AudioOutput>,
     video: Option<VideoDecoder>,
@@ -151,6 +158,7 @@ impl Player {
             info,
             tools,
             fps,
+            render_scale: 1.0,
             mode,
             no_audio,
             cols,
@@ -164,6 +172,8 @@ impl Player {
             volume: 100,
             muted: false,
             dropped: 0,
+            decode_read_ms: 0.0,
+            decoder_starved: false,
             warning: None,
             error: None,
             epoch: 0,
@@ -191,15 +201,7 @@ impl Player {
         self.wall = WallClock::new(offset);
         self.paused_position = Some(offset);
         self.state = PlayerState::Loading;
-        self.video = Some(VideoDecoder::start(
-            &self.tools,
-            &self.info,
-            offset,
-            self.epoch,
-            self.fps,
-            self.cols.max(1) as u32 * 2,
-            self.rows.max(1) as u32 * 4,
-        )?);
+        self.spawn_video(offset)?;
         if !self.no_audio && self.info.audio_stream.is_some() {
             match AudioOutput::start(&self.tools, &self.info, offset, self.volume, self.muted) {
                 Ok(output) => self.audio = Some(output),
@@ -207,6 +209,35 @@ impl Player {
             }
         }
         Ok(())
+    }
+
+    fn video_dimensions(&self) -> (u32, u32) {
+        (
+            (self.cols as f64 * self.render_scale).round().max(1.0) as u32 * 2,
+            (self.rows as f64 * self.render_scale).round().max(1.0) as u32 * 4,
+        )
+    }
+
+    fn spawn_video(&mut self, offset: f64) -> Result<()> {
+        let (width, height) = self.video_dimensions();
+        self.video = Some(VideoDecoder::start(
+            &self.tools,
+            &self.info,
+            offset,
+            self.epoch,
+            self.fps,
+            width,
+            height,
+        )?);
+        Ok(())
+    }
+
+    fn restart_video_at(&mut self, offset: f64) -> Result<()> {
+        self.video.take();
+        self.epoch += 1;
+        self.next_frame = None;
+        self.video_eof = false;
+        self.spawn_video(offset)
     }
 
     pub fn position(&self) -> f64 {
@@ -274,6 +305,19 @@ impl Player {
                 }
                 PlayerCommand::ToggleMute => self.muted = !self.muted,
                 PlayerCommand::SetMode(mode) => self.mode = mode,
+                PlayerCommand::SetPerformance { fps, scale } => {
+                    let fps = fps.clamp(1, 120);
+                    let scale = scale.clamp(0.75, 1.0);
+                    if self.fps != fps || (self.render_scale - scale).abs() > f64::EPSILON {
+                        self.fps = fps;
+                        self.render_scale = scale;
+                        if !matches!(self.state, PlayerState::Ended | PlayerState::Error)
+                            && !self.too_small
+                        {
+                            self.restart_video_at(self.position())?;
+                        }
+                    }
+                }
                 PlayerCommand::Resize {
                     cols,
                     rows,
@@ -295,19 +339,7 @@ impl Player {
                         && !matches!(self.state, PlayerState::Ended | PlayerState::Error)
                     {
                         let offset = self.position();
-                        self.video.take();
-                        self.epoch += 1;
-                        self.next_frame = None;
-                        self.video_eof = false;
-                        self.video = Some(VideoDecoder::start(
-                            &self.tools,
-                            &self.info,
-                            offset,
-                            self.epoch,
-                            self.fps,
-                            cols.max(1) as u32 * 2,
-                            rows.max(1) as u32 * 4,
-                        )?);
+                        self.restart_video_at(offset)?;
                     }
                 }
             }
@@ -324,6 +356,7 @@ impl Player {
 
     pub fn tick(&mut self) -> Vec<PlayerEvent> {
         let mut events = Vec::new();
+        self.decoder_starved = false;
         if matches!(self.state, PlayerState::Ended | PlayerState::Error) {
             return events;
         }
@@ -385,6 +418,14 @@ impl Player {
         {
             let frame = self.next_frame.take().unwrap();
             if frame.epoch == self.epoch {
+                if frame.read_elapsed > Duration::ZERO {
+                    let read_ms = frame.read_elapsed.as_secs_f64() * 1000.0;
+                    self.decode_read_ms = if self.decode_read_ms == 0.0 {
+                        read_ms
+                    } else {
+                        self.decode_read_ms * 0.8 + read_ms * 0.2
+                    };
+                }
                 self.display_end = frame.pts + 1.0 / self.fps as f64;
                 self.frame = Some(frame);
                 shown += 1;
@@ -392,11 +433,15 @@ impl Player {
             self.next_frame = self.video.as_ref().and_then(|v| v.frames.try_recv().ok());
         }
         self.dropped += shown.saturating_sub(1);
+        self.decoder_starved = self.next_frame.is_none()
+            && !self.video_eof
+            && self.frame.is_some()
+            && position > self.display_end + 0.1;
         self.state = if self.user_paused || self.too_small {
             PlayerState::Paused
         } else if self.audio.as_ref().is_some_and(AudioOutput::buffering)
             || self.frame.is_none()
-            || (self.next_frame.is_none() && !self.video_eof && position > self.display_end + 0.1)
+            || self.decoder_starved
         {
             PlayerState::Buffering
         } else {

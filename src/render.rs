@@ -49,6 +49,25 @@ pub fn fit(area: Rect, display_aspect: f64, cell_aspect: f64) -> Rect {
     )
 }
 
+pub fn scale_rect(area: Rect, scale: f64) -> Rect {
+    if area.is_empty() {
+        return area;
+    }
+    let scale = scale.clamp(0.75, 1.0);
+    let width = (area.width as f64 * scale)
+        .round()
+        .clamp(1.0, area.width as f64) as u16;
+    let height = (area.height as f64 * scale)
+        .round()
+        .clamp(1.0, area.height as f64) as u16;
+    Rect::new(
+        area.x + (area.width - width) / 2,
+        area.y + (area.height - height) / 2,
+        width,
+        height,
+    )
+}
+
 pub fn luma([r, g, b]: [u8; 3]) -> u16 {
     (54 * r as u16 + 183 * g as u16 + 19 * b as u16) / 256
 }
@@ -168,18 +187,22 @@ impl Widget for VideoWidget<'_> {
         {
             return;
         }
+        let sample_width = area.width as u32 * 2;
+        let sample_height = area.height as u32 * 4;
+        let x_samples: Vec<u32> = (0..sample_width)
+            .map(|x| (x * self.frame.width / sample_width).min(self.frame.width - 1))
+            .collect();
+        let y_samples: Vec<u32> = (0..sample_height)
+            .map(|y| (y * self.frame.height / sample_height).min(self.frame.height - 1))
+            .collect();
         let mut symbol = [0u8; 4];
         for row in 0..area.height {
             for col in 0..area.width {
                 let mut pixels = [[0; 3]; 8];
                 for y in 0..4 {
                     for x in 0..2 {
-                        let sx = ((col as u32 * 2 + x) * self.frame.width
-                            / (area.width as u32 * 2))
-                            .min(self.frame.width - 1);
-                        let sy = ((row as u32 * 4 + y) * self.frame.height
-                            / (area.height as u32 * 4))
-                            .min(self.frame.height - 1);
+                        let sx = x_samples[col as usize * 2 + x as usize];
+                        let sy = y_samples[row as usize * 4 + y as usize];
                         let index = (sy as usize * self.frame.width as usize + sx as usize) * 3;
                         pixels[(y * 2 + x) as usize]
                             .copy_from_slice(&self.frame.rgb[index..index + 3]);
@@ -235,6 +258,15 @@ mod tests {
             Rect::new(35, 0, 90, 45)
         );
         assert_eq!(fit(Rect::new(0, 0, 0, 0), 1.0, 0.5).width, 0);
+    }
+
+    #[test]
+    fn scaled_rect_stays_centered_and_within_bounds() {
+        let area = Rect::new(10, 4, 160, 45);
+        assert_eq!(scale_rect(area, 1.0), area);
+        assert_eq!(scale_rect(area, 0.9), Rect::new(18, 6, 144, 41));
+        assert_eq!(scale_rect(area, 0.1), Rect::new(30, 9, 120, 34));
+        assert_eq!(scale_rect(Rect::default(), 0.9), Rect::default());
     }
     #[test]
     fn palette_handles_primaries_and_grays() {
